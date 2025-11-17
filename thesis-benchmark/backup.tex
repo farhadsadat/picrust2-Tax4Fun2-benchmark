@@ -1,0 +1,138 @@
+%!TEX root = ../dissertation.tex
+\chapter{Introduction}
+\label{ch:intro}
+
+\section{Thesis Motivation}
+
+Microbial communities play a key role in maintaining ecological functioning across terrestrial environments. Soil is among the most diverse microbial habitats on Earth, containing a vast range of bacteria, archaea, fungi, and microeukaryotes. Within this environment, the region closely surrounding plant roots---known as the rhizosphere---is especially dynamic. Here, interactions between plant-derived exudates and soil microorganisms influence nutrient cycling, disease resistance, soil structure, and productivity. Because these interactions shape plant health and ecosystem resilience, understanding the functional traits of rhizosphere microbial communities is a topic of ongoing scientific and agricultural interest.
+
+However, characterizing the functional potential of microbiomes remains challenging. The two most common sequencing approaches provide complementary but incomplete perspectives:
+
+\begin{itemize}
+    \item \textbf{16S rRNA amplicon sequencing} profiles the taxonomic composition of microbial communities by amplifying and sequencing hypervariable regions of the ribosomal RNA gene. This approach is relatively inexpensive and scalable to large numbers of samples, making it widely used in ecological and clinical studies. However, 16S sequencing does not directly measure gene content or metabolic capacity, and functional traits must be inferred rather than observed.
+
+    \item \textbf{Shotgun metagenomic sequencing}, by contrast, sequences all genetic material in a sample. This allows direct identification of genes, metabolic pathways, and strain-level diversity. Yet, shotgun sequencing is significantly more expensive, often requires deeper sequencing to achieve adequate coverage, and demands more computational resources for processing and interpretation.
+\end{itemize}
+
+Due to these trade-offs, many microbiome studies rely primarily on 16S sequencing and use computational methods to infer functional profiles. One widely adopted tool in this domain is \textbf{PICRUSt2}. The tool operates on the principle that phylogenetically related organisms tend to share similar functional repertoires. By placing amplicon-derived sequences onto a reference tree and leveraging annotated genomes in public databases, PICRUSt2 estimates the abundance of gene families---such as KEGG Orthologs (KOs)---that are representative of the microbial community.
+
+While PICRUSt2 has shown promising results in some environments, its accuracy is strongly influenced by the representation of relevant taxa in genomic reference databases. Soil ecosystems, including the rhizosphere, contain many uncultivated or poorly characterized microorganisms. Therefore, the relationship between taxonomic similarity and functional similarity may be weaker than in environments such as the human gut, where genomes are better characterized. This raises the question of whether functional inference from 16S sequencing is sufficiently reliable in soil systems or whether shotgun sequencing remains necessary for accurate characterization.
+
+This thesis is motivated by this knowledge gap. The \textbf{Mendes et al.\ rhizosphere dataset} provides an ideal test case because it includes both 16S amplicon sequencing and shotgun metagenomic sequencing for the same samples. By directly comparing PICRUSt2-inferred functional profiles from 16S data to the true gene profiles obtained from shotgun metagenomics, we can evaluate functional inference performance at the sample level. This benchmark contributes to clarifying when PICRUSt2 can be trusted, when its predictions should be interpreted cautiously, and how inference-based approaches should be integrated into microbiome research pipelines.
+
+\section{Objectives of the Study}
+
+The central objective of this thesis is to evaluate how accurately functional gene profiles inferred from 16S rRNA amplicon data reflect those obtained from shotgun metagenomic sequencing in a soil rhizosphere environment. The Mendes et al. dataset provides a unique opportunity for such an evaluation because both data types were generated from the same biological samples. By analyzing them in parallel, it becomes possible to directly assess the strengths and weaknesses of inference-based functional profiling.
+
+To achieve this main goal, the thesis is structured around four interconnected methodological objectives.
+
+The first objective is to construct a reproducible and transparent 16S data processing pipeline. The workflow is implemented in QIIME2, a widely used platform in microbiome research that provides standardized tools for data preprocessing. Raw paired-end reads are imported using a manifest file that explicitly records sample origins and sequencing run identifiers. Primer sequences are then removed using cutadapt to prevent artificial variation caused by non-biological nucleotides. The denoising step is carried out using DADA2, which models and corrects sequencing errors to resolve amplicon sequence variants (ASVs) with single-nucleotide accuracy. This produces a high-quality representation of microbial community composition while avoiding biases associated with clustering sequences into operational taxonomic units (OTUs). The output of this stage is a FeatureTable containing ASV counts per sample and a representative sequence file, both of which serve as essential inputs for functional inference.
+
+The second objective is to use PICRUSt2 to infer functional gene abundances from the processed ASV data. PICRUSt2 constructs a phylogenetic placement of the ASVs and uses reference genomes to estimate gene family profiles. The tool outputs predicted abundances of KEGG Orthologs (KOs), which are standardized gene-level functional units commonly used for metabolic pathway reconstruction. In this thesis, the focus is placed on KO abundances because they allow direct comparison with the shotgun KO tables derived from metagenomic sequencing. During this stage, the Nearest Sequenced Taxon Index (NSTI) values generated by PICRUSt2 are used to evaluate the proximity of each ASV to known reference genomes. Lower NSTI values generally indicate higher prediction confidence, while higher values suggest potential functional uncertainty due to weak phylogenetic representation.
+
+The third objective is to align 16S-inferred functional profiles with shotgun-based measurements. In practice, the two sequencing workflows use different sample identifiers, requiring the construction of a sample-matching table. This mapping step ensures each 16S sample (identified by ERR accession codes) is paired with the corresponding shotgun sample label (Bulk, RAG, or RTP). Additionally, one sample with insufficient read depth following DADA2 denoising (ERR1456820) is excluded from all comparisons, as its functional profile cannot be reliably estimated. After matching, both datasets are filtered to retain only the overlapping samples, ensuring that comparisons are fair and biologically meaningful.
+
+The fourth objective is to quantitatively compare the inferred functional profiles with the observed profiles obtained from shotgun metagenomics. Two complementary similarity metrics are used. The first is Spearman rank correlation, which measures whether high-abundance and low-abundance KOs are ranked similarly between PICRUSt2 predictions and shotgun data, regardless of their exact numeric values. This allows evaluation of overall functional composition patterns. The second metric is Jaccard similarity, which assesses whether the same sets of KOs are present or absent in both profiles. This measure focuses on the coverage of functional capacity rather than the magnitude of gene abundance. By analyzing both metrics together, the benchmark can distinguish cases where PICRUSt2 captures broad functional patterns but fails to predict exact gene quantities, from cases where key functions are missing entirely.
+
+Taken together, these objectives form a systematic framework for evaluating functional inference in the rhizosphere microbiome. The approach not only quantifies the agreement between PICRUSt2 predictions and actual metagenomic measurements but also highlights which aspects of microbial function can be reliably inferred and which require direct sequencing.
+
+Ultimately, the findings of this thesis aim to support researchers in making informed methodological choices when studying complex soil microbial communities. In situations where shotgun metagenomics is not feasible, understanding the reliability of inference-based functional profiling determines whether conclusions drawn from 16S data are scientifically valid and interpretable.
+
+\section{Thesis Organization}
+
+The remainder of the thesis is structured as follows:
+
+\begin{itemize}
+    \item \textbf{Chapter~\ref{ch:dataset}} provides an overview of the Mendes rhizosphere dataset and describes preprocessing pipelines for both 16S and shotgun sequencing data.
+    
+    \item \textbf{Chapter~\ref{ch:methods}} details the PICRUSt2 inference workflow and the statistical framework used to evaluate functional similarity across matched samples.
+    
+    \item \textbf{Chapter~\ref{ch:results}} presents the main results of the benchmark, including per-sample similarity scores and comparisons across sample groups.
+    
+    \item \textbf{Chapter~\ref{ch:discussion}} examines the implications of the observed patterns, discusses the limitations of inference-based methods in soil systems, and relates the findings to prior studies.
+    
+    \item \textbf{Chapter~\ref{ch:conclusion}} summarizes the main contributions of the thesis and outlines potential extensions for future benchmarking work.
+\end{itemize}
+
+
+
+%!TEX root = ../dissertation.tex
+\chapter{Background}
+\label{ch:dataset}
+
+The goal of this chapter is to provide the conceptual and methodological background necessary to understand the technical workflow and benchmark analysis conducted in later chapters. We begin by introducing the ecological and biological relevance of soil microbial communities, with a particular focus on the rhizosphere. We then outline the main sequencing approaches used in microbiome research, discussing their advantages and limitations. Next, we describe the role of functional annotation frameworks such as KEGG Orthologs (KOs), which serve as a common representation of gene function across microbiomes. Finally, we introduce the principles and computational strategy of PICRUSt2, the inference tool evaluated in this thesis. Together, these sections establish the theoretical foundation for the benchmark performed in Chapter~\ref{ch:methods} and the analyses presented in Chapter~\ref{ch:results}.
+
+\section{Microbiomes and Functional Potential}
+
+Microbial communities are fundamental components of all ecosystems. In terrestrial systems, microorganisms participate in nutrient cycling, decomposition, soil structure formation, and plant health regulation. A single gram of fertile soil can contain billions of microbial cells and tens of thousands of phylogenetically distinct taxa. The structure and activity of these microbial communities influence plant productivity, carbon sequestration, and the resilience of ecosystems to stressors such as drought, pollutants, and climate change.
+
+Among soil habitats, the \textit{rhizosphere} is particularly dynamic and ecologically important. The rhizosphere is defined as the narrow region of soil directly influenced by plant roots. Through root growth, respiration, and secretion of metabolites (collectively referred to as \textit{root exudates}), plants actively shape the microbial community structure surrounding their root surfaces. These exudates serve as carbon and energy sources, effectively acting as chemical signals that recruit beneficial microorganisms or inhibit harmful ones.
+
+The interactions in the rhizosphere are highly reciprocal: microorganisms assist plants in nutrient acquisition (e.g., nitrogen fixation, phosphorus solubilization), stress tolerance, and pathogen defense, while plants provide microorganisms with energy-rich substrates. This mutualistic relationship forms the basis of \textit{plant-microbiome feedbacks} — processes that can influence plant growth outcomes and soil ecosystem stability.
+
+Understanding the rhizosphere microbiome thus requires more than taxonomic identification. Many microorganisms share similar 16S rRNA sequences but perform very different ecological roles. From a biological standpoint, \textbf{the functional capabilities of microbial communities are of higher importance than taxonomic composition alone}. A community composed of taxonomically distinct organisms may still be functionally redundant, and vice versa.
+
+Therefore, characterizing the functional potential of a microbiome — usually in terms of genes, enzymes, and metabolic pathways — is essential for linking microbial community structure to ecosystem-level outcomes.
+
+\section{16S rRNA Gene Sequencing}
+
+16S rRNA gene amplicon sequencing is one of the most widely used approaches for profiling microbiome taxonomic composition. The 16S gene is a highly conserved component of the ribosome in bacteria and archaea, containing both conserved regions (for universal primer binding) and hypervariable regions (V1–V9) that allow differentiation among taxa.
+
+Modern microbiome research increasingly relies on amplicon sequence variants (ASVs), which are inferred using denoising algorithms such as DADA2. ASVs represent exact biological sequences rather than clustered operational taxonomic units (OTUs), which enhances the resolution and reproducibility of microbial profiles. ASV-based workflows, such as those provided by QIIME2, allow researchers to trace microbial sequence variants across experiments or studies.
+
+Despite these advantages, the main limitation of 16S sequencing remains unchanged: \textbf{it does not directly measure functional potential}. The 16S gene provides reliable information on evolutionary relationships but does not encode metabolic, enzymatic, or regulatory information. As a result:
+\begin{itemize}
+    \item Two organisms with nearly identical 16S sequences may exhibit highly divergent genome content.
+    \item Gene gain and gene loss events are common in bacteria due to horizontal gene transfer.
+    \item Functional convergence occurs when unrelated organisms evolve similar metabolic traits.
+\end{itemize}
+
+Thus, while 16S sequencing is optimal for community profiling, it cannot directly answer questions about biochemical activity or metabolic roles. These limitations motivate functional inference methods such as PICRUSt2.
+
+\section{Shotgun Metagenomic Sequencing}
+
+Shotgun metagenomic sequencing offers a solution to the functional limitations of 16S sequencing. Instead of targeting a single marker gene, shotgun sequencing captures the full genomic content of all microorganisms present in a sample. This allows direct detection of:
+\begin{itemize}
+    \item metabolic genes,
+    \item antibiotic resistance markers,
+    \item virulence factors,
+    \item and pathway-level metabolic architecture.
+\end{itemize}
+
+However, shotgun sequencing presents several practical challenges:
+\begin{enumerate}
+    \item \textbf{High sequencing cost}. Soil is highly diverse, requiring deeper sequencing to capture rare genes.
+    \item \textbf{Computational intensity}. Assembly and annotation pipelines for shotgun data require significant memory and compute resources.
+    \item \textbf{Reference database bias}. Many soil microorganisms lack annotated genomes, leading to partial or uncertain functional classification.
+\end{enumerate}
+
+In practice, research projects must often choose between:
+\begin{itemize}
+    \item large sample sizes with lower functional resolution (16S),
+    \item or small sample sizes with high functional resolution (shotgun).
+\end{itemize}
+
+This cost-information trade-off is what motivates functional inference pipelines such as PICRUSt2.
+
+\section{KEGG Orthologs and Gene Function Annotation}
+
+To compare gene functions across microbiomes, a common representation is required. The Kyoto Encyclopedia of Genes and Genomes (KEGG) provides a structured system for describing gene function. KEGG Orthologs (KOs) represent groups of homologous genes that perform equivalent biochemical functions in different organisms. Representing gene repertoires as KO abundance tables allows:
+\begin{itemize}
+    \item comparison across samples and studies,
+    \item aggregation of genes into metabolic pathways,
+    \item linking functional profiles to ecosystem processes.
+\end{itemize}
+
+Both the PICRUSt2 output and the shotgun metagenomic dataset used in this thesis are represented in terms of KO abundance matrices, enabling direct comparability.
+
+\section{Functional Inference from 16S Data: PICRUSt2}
+
+PICRUSt2 estimates gene family abundances from ASV tables using phylogenetic placement. The method operates under the assumption that evolutionary proximity corresponds to similarity in gene content. The prediction pipeline includes:
+\begin{enumerate}
+    \item placing ASV sequences onto a reference phylogeny,
+    \item estimating gene copy numbers from nearest neighbors,
+    \item aggregating gene family counts across the community using ASV abundances.
+\end{enumerate}
+
+PICRUSt2 also provides NSTI scores, which indicate the average phylogenetic distance between observed ASVs and reference genomes. High NSTI scores correspond to environments where genome representation is low, such as soil. In such environments, the reliability of functional inference is uncertain. This is the central focus of this thesis: quantifying how accurate PICRUSt2 predictions are in a real rhizosphere soil dataset where both 16S and shotgun measurements are available.
+
