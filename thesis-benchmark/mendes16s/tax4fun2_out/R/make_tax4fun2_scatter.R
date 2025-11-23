@@ -7,11 +7,16 @@ suppressPackageStartupMessages({
 
 ## -------- paths (adapt if needed) --------
 proj_dir     <- "/Users/farhadsadat/thesis-benchmark"
-p2_file      <- file.path(proj_dir, "picrust2", "picrust2_out", "KO_metagenome_out", "pred_metagenome_unstrat.tsv.gz")
+
+tax_file     <- file.path(proj_dir, "mendes16s", "tax4fun2_out", "tax4fun2_KO_rel.tsv")
 shotgun_file <- file.path(proj_dir, "shotgun", "rhizo_wgs_p.txt")
-sample_map   <- file.path(proj_dir, "analysis", "sample_map.csv")
-fig_dir      <- file.path(proj_dir, "picrust2", "picrust2_out", "figures_scatter")
-metrics_csv  <- file.path(fig_dir, "figures_scatter_metrics_picrust2.csv")
+
+## professor's mapping: run_accession + sample_title
+sample_map   <- file.path(proj_dir, "analysis", "correct_map_samples.tsv")
+
+fig_dir      <- file.path(proj_dir, "mendes16s", "tax4fun2_out", "figures_scatter")
+metrics_csv  <- file.path(fig_dir, "figures_scatter_metrics_tax4fun2.csv")
+
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 
 ## -------- helpers --------
@@ -57,34 +62,31 @@ fread_smart <- function(path, ...) {
 }
 
 ## -------- loaders --------
-load_picrust2 <- function(path) {
+load_tax4fun2 <- function(path) {
   x <- fread_smart(path, sep = "\t", header = TRUE, quote = "", fill = TRUE,
                    na.strings = c("NA","NaN","","nan"), check.names = FALSE)
-  ## 1) KO column name varies; detect it
+  
+  # expect first column = KO, second = description
   if (!"KO" %in% names(x)) {
-    # common PICRUSt2 headers
-    cand <- c("function","feature","KEGG_Orthology","ko","KO")
-    have <- cand[cand %in% names(x)]
-    if (length(have)) setnames(x, have[1], "KO")
+    if (is_ko_vector(x[[1]])) data.table::setnames(x, 1, "KO")
   }
-  # fallback: detect by content
   if (!"KO" %in% names(x)) {
-    if (is_ko_vector(x[[1]])) setnames(x, 1, "KO")
-    else if (ncol(x) >= 2 && is_ko_vector(x[[2]])) {
-      x[, (names(x)[1]) := NULL]       # drop index col
-      setnames(x, 1, "KO")
-    } else {
-      peek_dt(x)
-      stop("Couldn't find a KO column in PICRUSt2 table. See peek above and adjust.")
-    }
+    peek_dt(x)
+    stop("Couldn't find a KO column in Tax4Fun2 table.")
   }
-  ## 2) normalize KO ids
+  
+  # drop description if present
+  if ("description" %in% names(x)) {
+    x[, description := NULL]
+  }
+  
   x[, KO := gsub('^"|\'|"$|\'$', "", as.character(KO))]
   x[, KO := sub("^(?i:ko:)", "", KO, perl = TRUE)]
   x <- x[nzchar(KO)]
-  ## 3) numeric-ize all non-KO columns
+  
   num <- setdiff(names(x), "KO")
   numericize_cols(x, num)
+  
   aggregate_dupe_KO(x)
 }
 
@@ -98,7 +100,7 @@ load_shotgun <- function(path) {
     trimws(nm)
   }
   setnames(w, clean_names(names(w)))
-  ## 2) KO column detection (same logic as Tax4Fun2 script)
+  ## 2) KO column detection
   if (!"KO" %in% names(w) && is_ko_vector(w[[1]])) setnames(w, 1, "KO")
   if (!"KO" %in% names(w) && ncol(w) >= 2 && is_ko_vector(w[[2]])) {
     w[, (names(w)[1]) := NULL]
@@ -132,16 +134,28 @@ jaccard_fun  <- function(x, y, th = 0) {
 }
 
 ## -------- load data --------
-cat("Reading PICRUSt2 KO table:", p2_file, "\n")
-p2 <- load_picrust2(p2_file)
+cat("Reading Tax4Fun2 KO table:", tax_file, "\n")
+tax <- load_tax4fun2(tax_file)
 
 cat("Reading shotgun KO table:", shotgun_file, "\n")
 wgs <- load_shotgun(shotgun_file)
 
 cat("Reading sample map:", sample_map, "\n")
 map <- fread(sample_map)
-setnames(map, tolower(names(map)))     # expect columns 'err', 'shotgun_id'
-map[, err := trimws(as.character(err))]
+setnames(map, tolower(names(map)))
+
+## professor's file has: run_accession, sample_title
+if (all(c("run_accession", "sample_title") %in% names(map))) {
+  setnames(map,
+           old = c("run_accession", "sample_title"),
+           new = c("err", "shotgun_id"))
+}
+
+if (!all(c("err","shotgun_id") %in% names(map))) {
+  stop("sample map must have columns (run_accession, sample_title) or (ERR, shotgun_id).")
+}
+
+map[, err        := trimws(as.character(err))]
 map[, shotgun_id := trimws(as.character(shotgun_id))]
 
 ## -------- loop & plot --------
@@ -152,48 +166,52 @@ for (i in seq_len(nrow(map))) {
   ERR <- map$err[i]
   SG  <- map$shotgun_id[i]
   
-  if (!(ERR %in% names(p2)))  { cat("Skip:", ERR, "not in PICRUSt2 table\n"); next }
+  if (!(ERR %in% names(tax))) { cat("Skip:", ERR, "not in Tax4Fun2 table\n"); next }
   if (!(SG %in% names(wgs)))  { cat("Skip:", SG,  "not in shotgun table\n");   next }
   
-  common_KO <- intersect(p2$KO, wgs$KO)
+  common_KO <- intersect(tax$KO, wgs$KO)
   if (!length(common_KO)) { cat("Skip pair", ERR, "/", SG, "no common KO\n"); next }
   
-  px <- p2[J(common_KO)][[ERR]]
+  tx <- tax[J(common_KO)][[ERR]]
   wx <- wgs[J(common_KO)][[SG]]
   
-  px[!is.finite(px)] <- 0
+  tx[!is.finite(tx)] <- 0
   wx[!is.finite(wx)] <- 0
-  if (sum(px) > 0) px <- px / sum(px)
+  
+  ## Tax4Fun2 is already relative, but we can re-normalize to be safe
+  if (sum(tx) > 0) tx <- tx / sum(tx)
   if (sum(wx) > 0) wx <- wx / sum(wx)
   
-  sp  <- spearman_fun(wx, px)
-  jac <- jaccard_fun(wx, px, th = 0)
+  sp  <- spearman_fun(wx, tx)
+  jac <- jaccard_fun(wx, tx, th = 0)
   
   rows_metrics[[length(rows_metrics)+1]] <- data.table(
     ERR = ERR, shotgun_id = SG, nKO = length(common_KO),
     spearman = sp, jaccard = jac
   )
   
-  df <- data.frame(KO = common_KO,
-                   shotgun_rel = wx,
-                   picrust2_rel = px)
+  df <- data.frame(
+    KO           = common_KO,
+    shotgun_rel  = wx,
+    tax4fun2_rel = tx
+  )
   
   eps <- 1e-6
   df$shotgun_log  <- log10(df$shotgun_rel + eps)
-  df$picrust2_log <- log10(df$picrust2_rel + eps)
+  df$tax4fun2_log <- log10(df$tax4fun2_rel + eps)
   
-  p <- ggplot(df, aes(x = shotgun_log, y = picrust2_log)) +
+  p <- ggplot(df, aes(x = shotgun_log, y = tax4fun2_log)) +
     geom_abline(slope = 1, intercept = 0, linetype = 2, alpha = 0.35) +
     geom_point(alpha = 0.45) +
     labs(
-      title = sprintf("PICRUSt2 vs Shotgun (%s / %s)", SG, ERR),
+      title = sprintf("Tax4Fun2 vs Shotgun (%s / %s)", SG, ERR),
       subtitle = sprintf("Spearman = %.3f   |   Jaccard = %.3f   |   nKO = %d", sp, jac, nrow(df)),
       x = "Shotgun KO rel. abundance (log10)",
-      y = "PICRUSt2 KO rel. abundance (log10)"
+      y = "Tax4Fun2 KO rel. abundance (log10)"
     ) +
     theme_bw(base_size = 11)
   
-  out_png <- file.path(fig_dir, sprintf("picrust2_scatter_%s_%s.png", ERR, SG))
+  out_png <- file.path(fig_dir, sprintf("tax4fun2_scatter_%s_%s.png", ERR, SG))
   ggsave(out_png, p, width = 6, height = 4, dpi = 300)
   cat("Saved scatter:", out_png, "\n")
   n_saved <- n_saved + 1L

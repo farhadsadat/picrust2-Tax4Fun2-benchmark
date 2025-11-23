@@ -1,8 +1,12 @@
+#!/usr/bin/env Rscript
+
 # --- Paths -------------------------------------------------------------------
 PROJ_DIR  <- "/Users/farhadsadat/thesis-benchmark"
 S16_DIR   <- file.path(PROJ_DIR, "mendes16s")
 OUT_DIR   <- file.path(S16_DIR, "tax4fun2_out")
-MAP_CSV   <- file.path(PROJ_DIR, "analysis", "sample_map.csv")
+
+# use professor's corrected mapping file
+MAP_CSV   <- file.path(PROJ_DIR, "analysis", "correct_map_samples.tsv")
 
 # --- Packages ----------------------------------------------------------------
 suppressPackageStartupMessages({
@@ -21,7 +25,97 @@ col_tax_wgs     <- fread(tax_csv)
 col_pt          <- fread(pt_csv)
 col_pic_vs_wgs  <- fread(ps_csv)
 smap            <- fread(MAP_CSV)
+
+# normalise mapping columns
 setnames(smap, tolower(names(smap)))
+
+# handle professor's file: run_accession + sample_title
+if (all(c("run_accession", "sample_title") %in% names(smap))) {
+  setnames(smap,
+           old = c("run_accession", "sample_title"),
+           new = c("err", "shotgun_id"))
+}
+
+if (!all(c("err", "shotgun_id") %in% names(smap))) {
+  stop("Mapping file must have columns (run_accession, sample_title) or (ERR, shotgun_id).")
+}
+
+smap[, err        := as.character(err)]
+smap[, shotgun_id := as.character(shotgun_id)]
+
+# define group from shotgun_id
+grp_fun <- function(s) {
+  s <- tolower(s)
+  if (startsWith(s, "bulk")) "Bulk"
+  else if (startsWith(s, "rag")) "RAG"
+  else if (startsWith(s, "rtp")) "RTP"
+  else "Other"
+}
+smap[, group := vapply(shotgun_id, grp_fun, character(1))]
+smap <- unique(smap[, .(err, shotgun_id, group)])
+
+# --- standardise column names in results -------------------------------------
+
+# lower-case all names
+setnames(col_tax_wgs,     tolower(names(col_tax_wgs)))
+setnames(col_pt,          tolower(names(col_pt)))
+setnames(col_pic_vs_wgs,  tolower(names(col_pic_vs_wgs)))
+
+# for tax4fun vs shotgun: expect 'shotgun', 'spearman', 'jaccard'
+if ("shotgun_id" %in% names(col_tax_wgs) && !"shotgun" %in% names(col_tax_wgs)) {
+  setnames(col_tax_wgs, "shotgun_id", "shotgun")
+}
+if (!"shotgun" %in% names(col_tax_wgs)) {
+  stop("colwise_tax4fun2_vs_shotgun.csv must have a 'shotgun' or 'shotgun_id' column.")
+}
+
+# for picrust2 vs shotgun
+if ("shotgun_id" %in% names(col_pic_vs_wgs) && !"shotgun" %in% names(col_pic_vs_wgs)) {
+  setnames(col_pic_vs_wgs, "shotgun_id", "shotgun")
+}
+if (!"shotgun" %in% names(col_pic_vs_wgs)) {
+  stop("colwise_picrust2_vs_shotgun.csv must have a 'shotgun' or 'shotgun_id' column.")
+}
+
+# for picrust2 vs tax4fun2: expect 'sample' (ERR)
+if ("err" %in% names(col_pt) && !"sample" %in% names(col_pt)) {
+  setnames(col_pt, "err", "sample")
+}
+if (!"sample" %in% names(col_pt)) {
+  stop("colwise_picrust2_vs_tax4fun2.csv must have a 'sample' or 'err' column.")
+}
+
+# --- attach group to each table ----------------------------------------------
+
+# Tax4Fun2 vs Shotgun: add group via shotgun
+if (!"group" %in% names(col_tax_wgs)) {
+  col_tax_wgs <- merge(
+    col_tax_wgs,
+    smap[, .(shotgun = shotgun_id, group)],
+    by = "shotgun",
+    all.x = TRUE
+  )
+}
+
+# PICRUSt2 vs Shotgun: add group via shotgun
+if (!"group" %in% names(col_pic_vs_wgs)) {
+  col_pic_vs_wgs <- merge(
+    col_pic_vs_wgs,
+    smap[, .(shotgun = shotgun_id, group)],
+    by = "shotgun",
+    all.x = TRUE
+  )
+}
+
+# PICRUSt2 vs Tax4Fun2: add group via sample (ERR)
+if (!"group" %in% names(col_pt)) {
+  col_pt <- merge(
+    col_pt,
+    smap[, .(sample = err, group)],
+    by = "sample",
+    all.x = TRUE
+  )
+}
 
 # --- Define your 27 target shotgun IDs ---------------------------------------
 TARGET_IDS <- c(
@@ -35,13 +129,24 @@ TARGET_IDS <- c(
 summarize_metrics <- function(dt, method_label, id_col = c("shotgun","sample")) {
   id_col <- match.arg(id_col)
   dts <- copy(dt)
+  
+  # restrict to target shotgun IDs
   if (id_col == "shotgun") {
+    if (!"shotgun" %in% names(dts)) stop("Expected 'shotgun' column in dt.")
     dts <- dts[shotgun %in% TARGET_IDS]
   } else {
+    # sample is ERR; map to those whose shotgun_id in TARGET_IDS
     keep_err <- smap[shotgun_id %in% TARGET_IDS, unique(err)]
+    if (!"sample" %in% names(dts)) stop("Expected 'sample' column in dt.")
     dts <- dts[sample %in% keep_err]
   }
+  
   if (!nrow(dts)) return(NULL)
+  
+  # make sure we have group, spearman, jaccard
+  if (!all(c("group", "spearman", "jaccard") %in% names(dts))) {
+    stop("dt must contain 'group', 'spearman', 'jaccard' columns.")
+  }
   
   mean_ci <- function(x){
     x <- x[is.finite(x)]
@@ -68,8 +173,10 @@ gs_pt   <- summarize_metrics(col_pt,         "PICRUSt2 vs Tax4Fun2",   id_col = 
 gs_ps   <- summarize_metrics(col_pic_vs_wgs, "PICRUSt2 vs Shotgun",    id_col = "shotgun")
 
 group_stats_subset <- rbindlist(list(gs_tax, gs_ps, gs_pt), fill = TRUE)
-fwrite(group_stats_subset, file.path(OUT_DIR, "group_stats_subset_27ids.csv"))
-message("Saved → group_stats_subset_27ids.csv")
+
+out_csv <- file.path(OUT_DIR, "group_stats_subset_27ids.csv")
+fwrite(group_stats_subset, out_csv)
+message("Saved → ", out_csv)
 
 # --- Quick grouped barplots (with 95% CI) ------------------------------------
 for (met in c("Spearman","Jaccard")) {
@@ -83,12 +190,14 @@ for (met in c("Spearman","Jaccard")) {
     theme_minimal(base_size = 12) +
     scale_fill_brewer(palette = "Greys") +
     coord_cartesian(ylim = c(0, 1))
-  ggsave(file.path(OUT_DIR, sprintf("subset27_%s_group_means.png", tolower(met))),
-         p, width = 7.5, height = 4.6, dpi = 220)
+  
+  out_png <- file.path(OUT_DIR, sprintf("subset27_%s_group_means.png", tolower(met)))
+  ggsave(out_png, p, width = 7.5, height = 4.6, dpi = 220)
 }
 
-message("Done.
-- group_stats_subset_27ids.csv
-- subset27_spearman_group_means.png
-- subset27_jaccard_group_means.png
-saved under mendes16s/tax4fun2_out/")
+message(
+  "Done.\n",
+  "- ", out_csv, "\n",
+  "- ", file.path(OUT_DIR, "subset27_spearman_group_means.png"), "\n",
+  "- ", file.path(OUT_DIR, "subset27_jaccard_group_means.png"), "\n"
+)
